@@ -133,6 +133,7 @@
         <DCCReference Include="chimera.pubsub.server.idhttp.pas"/>
         <DCCReference Include="chimera.pubsub.common.pas"/>
         <DCCReference Include="chimera.pubsub.client.idhttp.pas"/>
+        <DCCReference Include="chimera.pubsub.interfaces.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

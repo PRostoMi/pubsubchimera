@@ -34,10 +34,16 @@ unit chimera.pubsub.client.idhttp;
 interface
 
 uses System.SysUtils, System.Classes, IdHTTP, chimera.json,
-  System.Generics.Collections;
+  System.Generics.Collections, chimera.pubsub.interfaces;
 
 type
+  TDataEvent = procedure(Sender : TObject; const channel : IChannel<IJSONObject>; const Context : string; const Data : IJSONObject) of object;
   TMessageEvent = procedure(Sender : TObject; const Msg : IJSONObject) of object;
+
+  TSuccessHandler = reference to procedure(const channel : string; const Msg : IJSONObject);
+  TPublishErrorHandler = reference to procedure(const channel : string; const Msg : IJSONObject; const E : Exception);
+  TSubscribeErrorHandler = reference to procedure(const channel : string; const E : Exception; var Retry : boolean);
+
   TPubSubHTTPClient = class(TComponent)
   private
     FThreads : TDictionary<string, TThread>;
@@ -47,15 +53,17 @@ type
     FHost: string;
     FRootPath: string;
     FSynchronize: boolean;
+    FOnClearMessage: TDataEvent;
+    FOnStoreMessage: TDataEvent;
     procedure SetChannels(const Value: TStrings);
   protected
     procedure DoMessage(const msg : IJSONObject); virtual;
     procedure DoMessages(const ary : IJSONArray); virtual;
   public
-    procedure Subscribe(const Channel : string);
+    procedure Subscribe(const Channel : string; const OnError : TSubscribeErrorHandler = nil);
     procedure Unsubscribe(const Channel : string);
 
-    procedure Publish(const Channel : string; const Msg : IJSONObject);
+    procedure Publish(const Channel : string; const Msg : IJSONObject; const OnSuccess : TSuccessHandler = nil; const OnError : TPublishErrorHandler = nil);
 
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -120,7 +128,8 @@ begin
 end;
 
 procedure TPubSubHTTPClient.Publish(const Channel: string;
-  const Msg: IJSONObject);
+  const Msg: IJSONObject; const OnSuccess: TSuccessHandler = nil;
+  const OnError: TPublishErrorHandler = nil);
 begin
   TThread.CreateAnonymousThread(
     procedure
@@ -129,30 +138,38 @@ begin
       sHost : string;
       ssPost : TStringStream;
     begin
-      http := TIdHTTP.Create(nil);
       try
-        if FHost.ToLower.StartsWith('https://') or (FPort = 443) then
-          http.IOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(http);
-        http.AllowCookies := True;
-        http.HandleRedirects := True;
-        http.CookieManager := TIdCookieManager.Create(http);
-        if FPort > 0 then
-          sHost := FHost+':'+FPort.ToString+RootPath
-        else
-          sHost := FHost+RootPath;
-
-        if not Channel.StartsWith('/') then
-          sHost := sHost+'/';
-
-        ssPost := TStringStream.Create(UTF8String(msg.AsJSON),TEncoding.UTF8);
+        http := TIdHTTP.Create(nil);
         try
-          http.Request.ContentType := 'application/json';
-          http.Post(sHost+Channel, ssPost);
+          if FHost.ToLower.StartsWith('https://') or (FPort = 443) then
+            http.IOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(http);
+          http.AllowCookies := True;
+          http.HandleRedirects := True;
+          http.CookieManager := TIdCookieManager.Create(http);
+          if FPort > 0 then
+            sHost := FHost+':'+FPort.ToString+RootPath
+          else
+            sHost := FHost+RootPath;
+
+          if not Channel.StartsWith('/') then
+            sHost := sHost+'/';
+
+          ssPost := TStringStream.Create(UTF8String(msg.AsJSON),TEncoding.UTF8);
+          try
+            http.Request.ContentType := 'application/json';
+            http.Post(sHost+Channel, ssPost);
+            if Assigned(OnSuccess) then
+              OnSuccess(Channel, Msg);
+          finally
+            ssPost.Free;
+          end;
         finally
-          ssPost.Free;
+          http.Free;
         end;
-      finally
-        http.Free;
+      except
+        on E : Exception do
+          if Assigned(OnError) then
+            OnError(Channel, Msg, E);
       end;
     end
   ).Start;
@@ -166,7 +183,7 @@ end;
 type
   TThreadHack = class(TThread);
 
-procedure TPubSubHTTPClient.Subscribe(const Channel: string);
+procedure TPubSubHTTPClient.Subscribe(const Channel: string; const OnError : TSubscribeErrorHandler = nil);
 var
   thread : TThread;
 begin
@@ -179,6 +196,7 @@ begin
         sHost : string;
         ssOut : TStringStream;
         jsa : IJSONArray;
+        bRetry : boolean;
       begin
         http := TIdHTTP.Create(nil);
         try
@@ -195,28 +213,36 @@ begin
           if not Channel.StartsWith('/') then
             sHost := sHost+'/';
 
-          while not TThreadHack(TThread.CurrentThread).Terminated do
-          begin
-            ssOut := TStringStream.Create;
-            try
-              http.Get(sHost+Channel,ssOut);
-              if ssOut.DataString <> '' then
-              begin
-                jsa := JSONArray(ssOut.DataString);
-                if FSynchronize then
-                begin
-                  TThread.Synchronize(TThread.CurrentThread,
-                    procedure
-                    begin
-                      DoMessages(jsa);
-                    end
-                  );
-                end else
-                  DoMessages(jsa);
-              end;
+          bRetry := True;
 
-            finally
-              ssOut.Free;
+          while (not TThreadHack(TThread.CurrentThread).Terminated) and bRetry do
+          begin
+            try
+              ssOut := TStringStream.Create;
+              try
+                http.Get(sHost+Channel,ssOut);
+                if ssOut.DataString <> '' then
+                begin
+                  jsa := JSONArray(ssOut.DataString);
+                  if FSynchronize then
+                  begin
+                    TThread.Synchronize(TThread.CurrentThread,
+                      procedure
+                      begin
+                        DoMessages(jsa);
+                      end
+                    );
+                  end else
+                    DoMessages(jsa);
+                end;
+
+              finally
+                ssOut.Free;
+              end;
+            except
+              on e: exception do
+                if Assigned(OnError) then
+                  OnError(channel, E, bRetry);
             end;
           end;
         finally

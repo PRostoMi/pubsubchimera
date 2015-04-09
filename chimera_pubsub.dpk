@@ -40,7 +40,8 @@ contains
   chimera.pubsub.producer in 'chimera.pubsub.producer.pas',
   chimera.pubsub.server.idhttp in 'chimera.pubsub.server.idhttp.pas',
   chimera.pubsub.common in 'chimera.pubsub.common.pas',
-  chimera.pubsub.client.idhttp in 'chimera.pubsub.client.idhttp.pas';
+  chimera.pubsub.client.idhttp in 'chimera.pubsub.client.idhttp.pas',
+  chimera.pubsub.interfaces in 'chimera.pubsub.interfaces.pas';
 
 end.
 

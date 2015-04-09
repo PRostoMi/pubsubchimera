@@ -71,12 +71,32 @@ begin
   jso.Strings['user'] := txtUsername.Text;
   jso.Strings['message'] := txtMessage.Text;
 
-  PubSubHTTPClient1.Publish('/pubsub',jso);
+  PubSubHTTPClient1.Publish('/pubsub',jso, nil,
+    procedure(const Channel : String; const Msg : IJSONObject; const E: Exception)
+    begin
+      TThread.Synchronize(TThread.CurrentThread,
+        procedure
+        begin
+          ShowMessage('Message could not be delivered: '+e.Message);
+        end
+      );
+    end
+  );
 end;
 
 procedure TForm2.FormCreate(Sender: TObject);
 begin
-  PubSubHTTPClient1.Subscribe('/pubsub');
+  PubSubHTTPClient1.Subscribe('/pubsub',
+    procedure(const Channel : String; const E: Exception; var Retry : boolean)
+    begin
+      TThread.Synchronize(TThread.CurrentThread,
+        procedure
+        begin
+          txtChat.Lines.Insert(0,'Channel Error: '+e.Message);
+        end
+      );
+      Sleep(5000); // wait some time before retry so as not to ddos the server.
+    end);
 end;
 
 procedure TForm2.PubSubHTTPClient1Message(Sender: TObject;

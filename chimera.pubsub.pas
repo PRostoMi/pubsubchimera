@@ -34,29 +34,9 @@ unit chimera.pubsub;
 interface
 
 uses System.SysUtils, System.Classes, System.Generics.Collections,
-  System.SyncObjs;
+  System.SyncObjs, chimera.pubsub.interfaces;
 
 type
-  TMessageHandler<T> = reference to procedure(const Msg : T);
-
-  IChannel<T> = interface(IInterface)
-      function GetName : string;
-
-      procedure Subscribe(Handler : TMessageHandler<T>; const ID : string = '');
-      procedure Unsubscribe(Handler : TMessageHandler<T>; const ID : string = '');
-      procedure Publish(const Msg : T; const ID : string = '');
-      procedure BeginContext(const Context : string; const ID : string = ''); overload;
-      procedure BeginContext(const Context : string; const Prefill : TArray<T>; const ID : string = ''); overload;
-      function BeginAndGetContext(const Context : string; const ID : string = '') : TQueue<T>; overload;
-      function BeginAndGetContext(const Context : string; const Prefill : TArray<T>; const ID : string = '') : TQueue<T>; overload;
-      function EndContext(const Context : string) : TArray<T>;
-      function WaitOnContext(const Context : string; Timeout : integer; const ID : string = '') : TArray<T>;
-      //procedure LoadContext(const Context : String; const Data : TArray<T>; const ID : string = ''); overload;
-      //procedure LoadContext(const Context : String; const Data : T; const ID : string = ''); overload;
-
-      property Name : string read GetName;
-  end;
-
   TCreateChannelHandler<T> = reference to function(const Channel : string) : IChannel<T>;
   TContextHandler<T> = reference to procedure(const channel : IChannel<T>; const Context : String; Queue : TQueue<T>);
   TDataHandler<T> = reference to procedure(const channel : IChannel<T>; const Context : string; Data : T );
