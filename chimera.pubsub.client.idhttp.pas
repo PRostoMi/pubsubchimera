@@ -187,6 +187,7 @@ procedure TPubSubHTTPClient.Subscribe(const Channel: string; const OnError : TSu
 var
   thread : TThread;
 begin
+  FChannels.Add(Channel);
   TMonitor.Enter(FThreads);
   try
     thread := TThread.CreateAnonymousThread(
@@ -247,6 +248,12 @@ begin
           end;
         finally
           http.Free;
+          TThread.Synchronize(TThread.CurrentThread,
+            procedure
+            begin
+              FChannels.Delete(FChannels.IndexOf(Channel));
+            end
+          );
         end;
       end
     );
