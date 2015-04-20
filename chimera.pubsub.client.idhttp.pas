@@ -33,13 +33,14 @@ unit chimera.pubsub.client.idhttp;
 
 interface
 
-uses System.SysUtils, System.Classes, IdHTTP, chimera.json,
-  System.Generics.Collections, chimera.pubsub.interfaces;
+uses System.SysUtils, System.Classes, IdHTTP, chimera.json,chimera.pubsub.interfaces,
+  System.Generics.Collections {$IFDEF ANDROID},System.ByteStrings{$ENDIF};
 
 type
   TDataEvent = procedure(Sender : TObject; const channel : IChannel<IJSONObject>; const Context : string; const Data : IJSONObject) of object;
   TMessageEvent = procedure(Sender : TObject; const Msg : IJSONObject) of object;
 
+  TMessageHandler = reference to procedure(const Msg : IJSONObject);
   TSuccessHandler = reference to procedure(const channel : string; const Msg : IJSONObject);
   TPublishErrorHandler = reference to procedure(const channel : string; const Msg : IJSONObject; const E : Exception);
   TSubscribeErrorHandler = reference to procedure(const channel : string; const E : Exception; var Retry : boolean);
@@ -57,13 +58,16 @@ type
     FOnStoreMessage: TDataEvent;
     procedure SetChannels(const Value: TStrings);
   protected
-    procedure DoMessage(const msg : IJSONObject); virtual;
-    procedure DoMessages(const ary : IJSONArray); virtual;
+    procedure DoMessage(const msg : IJSONObject; handler : TMessageHandler); virtual;
+    procedure DoMessages(const ary : IJSONArray; handler : TMessageHandler); virtual;
   public
-    procedure Subscribe(const Channel : string; const OnError : TSubscribeErrorHandler = nil);
+    procedure Subscribe(const Channel : string); overload;
+    procedure Subscribe(const Channel : string; const OnError : TSubscribeErrorHandler); overload;
+    procedure Subscribe(const Channel : string; const OnMessage : TMessageHandler; const OnError : TSubscribeErrorHandler); overload;
     procedure Unsubscribe(const Channel : string);
 
-    procedure Publish(const Channel : string; const Msg : IJSONObject; const OnSuccess : TSuccessHandler = nil; const OnError : TPublishErrorHandler = nil);
+    procedure Publish(const Channel : string; const Msg : IJSONObject; const OnSuccess : TSuccessHandler = nil; const OnError : TPublishErrorHandler = nil); overload;
+    procedure Publish(const Channel : string; const SetupMsg : TMessageHandler; const OnSuccess : TSuccessHandler = nil; const OnError : TPublishErrorHandler = nil); overload;
 
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -111,20 +115,33 @@ begin
   inherited;
 end;
 
-procedure TPubSubHTTPClient.DoMessage(const msg: IJSONObject);
+procedure TPubSubHTTPClient.DoMessage(const msg: IJSONObject; handler : TMessageHandler);
 begin
   if Assigned(FOnMessage) then
     FOnMessage(Self, msg);
+  if Assigned(handler) then
+    handler(msg);
 end;
 
-procedure TPubSubHTTPClient.DoMessages(const ary: IJSONArray);
+procedure TPubSubHTTPClient.DoMessages(const ary: IJSONArray; handler : TMessageHandler);
 var
   i: Integer;
 begin
   for i := 0 to ary.Count-1 do
   begin
-    DoMessage(ary.Objects[i]);
+    DoMessage(ary.Objects[i], handler);
   end;
+end;
+
+procedure TPubSubHTTPClient.Publish(const Channel: string;
+  const SetupMsg: TMessageHandler; const OnSuccess: TSuccessHandler;
+  const OnError: TPublishErrorHandler);
+var
+  msg : IJSONObject;
+begin
+  msg := JSON;
+  SetupMsg(msg);
+  publish(Channel, msg, OnSuccess, OnError);
 end;
 
 procedure TPubSubHTTPClient.Publish(const Channel: string;
@@ -180,10 +197,16 @@ begin
   FChannels.Assign(Value);
 end;
 
+procedure TPubSubHTTPClient.Subscribe(const Channel: string);
+begin
+  Subscribe(Channel,nil,nil);
+end;
+
 type
   TThreadHack = class(TThread);
 
-procedure TPubSubHTTPClient.Subscribe(const Channel: string; const OnError : TSubscribeErrorHandler = nil);
+procedure TPubSubHTTPClient.Subscribe(const Channel: string;
+  const OnMessage: TMessageHandler; const OnError: TSubscribeErrorHandler);
 var
   thread : TThread;
 begin
@@ -230,11 +253,11 @@ begin
                     TThread.Synchronize(TThread.CurrentThread,
                       procedure
                       begin
-                        DoMessages(jsa);
+                        DoMessages(jsa, OnMessage);
                       end
                     );
                   end else
-                    DoMessages(jsa);
+                    DoMessages(jsa, OnMessage);
                 end;
 
               finally
@@ -262,6 +285,11 @@ begin
   finally
     TMonitor.Exit(FThreads);
   end;
+end;
+
+procedure TPubSubHTTPClient.Subscribe(const Channel: string; const OnError : TSubscribeErrorHandler);
+begin
+  Subscribe(Channel,nil,OnError);
 end;
 
 procedure TPubSubHTTPClient.Unsubscribe(const Channel: string);
